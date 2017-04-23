@@ -26,7 +26,8 @@ var count_witnessings_available = 0;
 if (!conf.bSingleAddress)
 	throw Error('oracle must be single address');
 
-headlessWallet.setupChatEventHandlers();
+if (!conf.bRunWitness)
+	headlessWallet.setupChatEventHandlers();
 
 // this duplicates witness code if we are also running a witness
 function readNumberOfWitnessingsAvailable(handleNumber){
