@@ -173,8 +173,12 @@ function readExistingData(feed_name, device_address, handleResult){
 		function(rows){
 			if (rows.length === 0)
 				return handleResult();
-			if (!rows[0].is_stable)
-				assocDeviceAddressesByFeedName[feed_name].push(device_address);
+			if (!rows[0].is_stable){
+				if (!assocDeviceAddressesByFeedName[feed_name])
+					assocDeviceAddressesByFeedName[feed_name] = [device_address];
+				else
+					assocDeviceAddressesByFeedName[feed_name].push(device_address);
+			}
 			var data = {};
 			rows.forEach(row => {
 				data[row.feed_name] = row.value || row.int_value;
