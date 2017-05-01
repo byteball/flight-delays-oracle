@@ -15,6 +15,7 @@ exports.permanent_paring_secret = '0000';
 exports.control_addresses = ['DEVICE ALLOWED TO CHAT'];
 exports.payout_address = 'WHERE THE MONEY CAN BE SENT TO';
 
+exports.bIgnoreUnpairRequests = true;
 exports.bSingleAddress = true;
 exports.THRESHOLD_DISTANCE = 20;
 exports.MIN_AVAILABLE_WITNESSINGS = 100;
