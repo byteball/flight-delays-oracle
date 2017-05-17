@@ -222,7 +222,7 @@ function status2text(flightStatus){
 		case 'C': return 'canceled';
 		case 'D': return 'diverted';
 		case 'R': return 'redirected';
-		default: flightStatus;
+		default: return flightStatus;
 	}
 }
 
