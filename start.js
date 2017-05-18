@@ -14,6 +14,9 @@ var notifications = require('./notifications.js');
 if (conf.bRunWitness)
 	require('byteball-witness');
 
+const MAX_REQUESTS_PER_DAY = 100;
+const MAX_REQUESTS_PER_DEVICE_PER_DAY = 10;
+
 const RETRY_TIMEOUT = 5*60*1000;
 const TAXI_IN_TIME = 15*60*1000; // 15 mins
 var assocQueuedDataFeeds = {};
@@ -189,6 +192,22 @@ function readExistingData(feed_name, device_address, handleResult){
 	);
 }
 
+function checkRequestQuota(device_address, handleResult){
+	db.query("SELECT COUNT(*) AS count FROM fd_responses WHERE device_address=? AND creation_date > "+db.addTime("-1 DAY"), [device_address], function(rows){
+		if (rows[0].count > MAX_REQUESTS_PER_DEVICE_PER_DAY){
+			notifications.notifyAdmin("too many requests from "+device_address, rows[0].count+" requests today from "+device_address);
+			return handleResult("Too many requests today, try again tomorrow");
+		}
+		db.query("SELECT COUNT(*) AS count FROM fd_responses WHERE creation_date > "+db.addTime("-1 DAY"), function(rows){
+			if (rows[0].count > MAX_REQUESTS_PER_DAY){
+				notifications.notifyAdmin("too many requests", rows[0].count+" requests today");
+				return handleResult("Too many requests today, try again tomorrow");
+			}
+			handleResult();
+		});
+	});
+}
+
 function getDelayText(delay, remark, bInDb, browser_url){
 	var est_text = "";
 	if (remark === 'runway')
@@ -275,83 +294,88 @@ eventBus.on('text', function(from_address, text){
 		if (typeof delay === 'number')
 			return device.sendMessageToDevice(from_address, 'text', getDelayText(delay, remark, bStable, browser_url));
 
-		let url = "https://api.flightstats.com/flex/flightstatus/rest/v2/json/flight/status/"+airline+"/"+flight_number+"/dep/"+year+"/"+month+"/"+day+"?appId="+conf.flightstatsAppId+"&appKey="+conf.flightstatsAppKey+"&utc=false";
-		console.log('will request '+url);
+		checkRequestQuota(from_address, function(err){
+			if (err)
+				return device.sendMessageToDevice(from_address, 'text', err);
+			
+			let url = "https://api.flightstats.com/flex/flightstatus/rest/v2/json/flight/status/"+airline+"/"+flight_number+"/dep/"+year+"/"+month+"/"+day+"?appId="+conf.flightstatsAppId+"&appKey="+conf.flightstatsAppKey+"&utc=false";
+			console.log('will request '+url);
 
-		request(url, function(error, response, body){
-			if (error || response.statusCode !== 200){
-				notifications.notifyAdminAboutPostingProblem("getting flightstats data for "+full_flight+" failed: "+error+", status="+response.statusCode);
-				return device.sendMessageToDevice(from_address, 'text', "Failed to fetch flightstats data.");
-			}
-			console.log('response:\n'+body);
-			db.query("INSERT INTO fd_responses (device_address, feed_name, response) VALUES(?,?,?)", [from_address, feed_name, body], function(){});
-			let jsonResult = JSON.parse(body);
-			if (jsonResult.error && jsonResult.error.errorMessage){
-				notifications.notifyAdminAboutPostingProblem("error from flightstats: "+body);
-				return device.sendMessageToDevice(from_address, 'text', "Error from flightstats: "+jsonResult.error.errorMessage);
-			}
-			let arrStatuses = jsonResult.flightStatuses;
-			if (!arrStatuses || !Array.isArray(arrStatuses)){
-				notifications.notifyAdminAboutPostingProblem("no statuses: "+body);
-				return device.sendMessageToDevice(from_address, 'text', "Bad data from flightstats.");
-			}
-			if (arrStatuses.length === 0)
-				return device.sendMessageToDevice(from_address, 'text', "No information about this flight.");
-			let lastFlightStatus = arrStatuses[arrStatuses.length-1];
-			if (lastFlightStatus.status === 'S' || lastFlightStatus.status === 'A')
-				return device.sendMessageToDevice(from_address, 'text', "The flight has not finished yet.");
-			if (lastFlightStatus.status === 'U' || lastFlightStatus.status === 'DN')
-				return device.sendMessageToDevice(from_address, 'text', "Flightstats doesn't know anything about this flight.");
-			if (lastFlightStatus.status === 'NO')
-				return device.sendMessageToDevice(from_address, 'text', "The flight is not operational.");
-			if (lastFlightStatus.status !== 'L'){ // C, R, D
+			request(url, function(error, response, body){
+				if (error || response.statusCode !== 200){
+					notifications.notifyAdminAboutPostingProblem("getting flightstats data for "+full_flight+" failed: "+error+", status="+response.statusCode);
+					return device.sendMessageToDevice(from_address, 'text', "Failed to fetch flightstats data.");
+				}
+				console.log('response:\n'+body);
+				db.query("INSERT INTO fd_responses (device_address, feed_name, response) VALUES(?,?,?)", [from_address, feed_name, body], function(){});
+				let jsonResult = JSON.parse(body);
+				if (jsonResult.error && jsonResult.error.errorMessage){
+					notifications.notifyAdminAboutPostingProblem("error from flightstats: "+body);
+					return device.sendMessageToDevice(from_address, 'text', "Error from flightstats: "+jsonResult.error.errorMessage);
+				}
+				let arrStatuses = jsonResult.flightStatuses;
+				if (!arrStatuses || !Array.isArray(arrStatuses)){
+					notifications.notifyAdminAboutPostingProblem("no statuses: "+body);
+					return device.sendMessageToDevice(from_address, 'text', "Bad data from flightstats.");
+				}
+				if (arrStatuses.length === 0)
+					return device.sendMessageToDevice(from_address, 'text', "No information about this flight.");
+				let lastFlightStatus = arrStatuses[arrStatuses.length-1];
+				if (lastFlightStatus.status === 'S' || lastFlightStatus.status === 'A')
+					return device.sendMessageToDevice(from_address, 'text', "The flight has not finished yet.");
+				if (lastFlightStatus.status === 'U' || lastFlightStatus.status === 'DN')
+					return device.sendMessageToDevice(from_address, 'text', "Flightstats doesn't know anything about this flight.");
+				if (lastFlightStatus.status === 'NO')
+					return device.sendMessageToDevice(from_address, 'text', "The flight is not operational.");
+				if (lastFlightStatus.status !== 'L'){ // C, R, D
+					var datafeed = {};
+					datafeed[feed_name] = 10000;
+					datafeed[feed_name+'-remark'] = status2text(lastFlightStatus.status);
+					reliablyPostDataFeed(datafeed, from_address);
+					return device.sendMessageToDevice(from_address, 'text', "The flight was canceled, diverted, or redirected.  This counts as large delay.\n\nThe data will be added into the database, I'll let you know when it is confirmed and you are able to unlock your contract.\n\n"+browser_url);
+				}
+
+				let operationalTimes = lastFlightStatus.operationalTimes;
+				var plannedArrival, actualArrival;
+
+				if (operationalTimes.publishedArrival)
+					plannedArrival = Date.parse(operationalTimes.publishedArrival.dateUtc);
+				else if (operationalTimes.scheduledGateArrival)
+					plannedArrival = Date.parse(operationalTimes.scheduledGateArrival.dateUtc);
+				else{
+					notifications.notifyAdminAboutPostingProblem("no planned arrival for "+full_flight);
+					return device.sendMessageToDevice(from_address, 'text', "Unable to determine planned arrival date.");
+				}
+				if (!plannedArrival || plannedArrival === NaN)
+					throw Error("bad planned arrival date");
+
+				if (operationalTimes.actualGateArrival)
+					actualArrival = Date.parse(operationalTimes.actualGateArrival.dateUtc);
+				else if (operationalTimes.estimatedGateArrival)
+					actualArrival = Date.parse(operationalTimes.estimatedGateArrival.dateUtc);
+				else if (operationalTimes.actualRunwayArrival){
+					actualArrival = Date.parse(operationalTimes.actualRunwayArrival.dateUtc) + TAXI_IN_TIME;
+					remark = 'runway';
+				}
+				else if (operationalTimes.estimatedRunwayArrival){
+					actualArrival = Date.parse(operationalTimes.estimatedRunwayArrival.dateUtc) + TAXI_IN_TIME;
+					remark = 'runway';
+				}
+				else{
+					notifications.notifyAdminAboutPostingProblem("no planned arrival for "+full_flight);
+					return device.sendMessageToDevice(from_address, 'text', "Unable to determine planned arrival date.");
+				}
+				if (!actualArrival || actualArrival === NaN || actualArrival <= TAXI_IN_TIME)
+					throw Error("bad actual arrival date");
+
+				var delay = Math.round((actualArrival - plannedArrival)/1000/60);
 				var datafeed = {};
-				datafeed[feed_name] = 10000;
-				datafeed[feed_name+'-remark'] = status2text(lastFlightStatus.status);
+				datafeed[feed_name] = delay;
+				if (remark)
+					datafeed[feed_name+'-remark'] = remark;
 				reliablyPostDataFeed(datafeed, from_address);
-				return device.sendMessageToDevice(from_address, 'text', "The flight was canceled, diverted, or redirected.  This counts as large delay.\n\nThe data will be added into the database, I'll let you know when it is confirmed and you are able to unlock your contract.\n\n"+browser_url);
-			}
-
-			let operationalTimes = lastFlightStatus.operationalTimes;
-			var plannedArrival, actualArrival;
-
-			if (operationalTimes.publishedArrival)
-				plannedArrival = Date.parse(operationalTimes.publishedArrival.dateUtc);
-			else if (operationalTimes.scheduledGateArrival)
-				plannedArrival = Date.parse(operationalTimes.scheduledGateArrival.dateUtc);
-			else{
-				notifications.notifyAdminAboutPostingProblem("no planned arrival for "+full_flight);
-				return device.sendMessageToDevice(from_address, 'text', "Unable to determine planned arrival date.");
-			}
-			if (!plannedArrival || plannedArrival === NaN)
-				throw Error("bad planned arrival date");
-
-			if (operationalTimes.actualGateArrival)
-				actualArrival = Date.parse(operationalTimes.actualGateArrival.dateUtc);
-			else if (operationalTimes.estimatedGateArrival)
-				actualArrival = Date.parse(operationalTimes.estimatedGateArrival.dateUtc);
-			else if (operationalTimes.actualRunwayArrival){
-				actualArrival = Date.parse(operationalTimes.actualRunwayArrival.dateUtc) + TAXI_IN_TIME;
-				remark = 'runway';
-			}
-			else if (operationalTimes.estimatedRunwayArrival){
-				actualArrival = Date.parse(operationalTimes.estimatedRunwayArrival.dateUtc) + TAXI_IN_TIME;
-				remark = 'runway';
-			}
-			else{
-				notifications.notifyAdminAboutPostingProblem("no planned arrival for "+full_flight);
-				return device.sendMessageToDevice(from_address, 'text', "Unable to determine planned arrival date.");
-			}
-			if (!actualArrival || actualArrival === NaN || actualArrival <= TAXI_IN_TIME)
-				throw Error("bad actual arrival date");
-
-			var delay = Math.round((actualArrival - plannedArrival)/1000/60);
-			var datafeed = {};
-			datafeed[feed_name] = delay;
-			if (remark)
-				datafeed[feed_name+'-remark'] = remark;
-			reliablyPostDataFeed(datafeed, from_address);
-			device.sendMessageToDevice(from_address, 'text', getDelayText(delay, remark, false, browser_url));
+				device.sendMessageToDevice(from_address, 'text', getDelayText(delay, remark, false, browser_url));
+			});
 		});
 	});
 
