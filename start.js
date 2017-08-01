@@ -362,11 +362,14 @@ eventBus.on('text', function(from_address, text){
 					remark = 'runway';
 				}
 				else{
-					notifications.notifyAdminAboutPostingProblem("no planned arrival for "+full_flight);
-					return device.sendMessageToDevice(from_address, 'text', "Unable to determine planned arrival date.");
+					notifications.notifyAdminAboutPostingProblem("no actual arrival for "+full_flight);
+					return device.sendMessageToDevice(from_address, 'text', "Unable to determine actual arrival date.");
 				}
 				if (!actualArrival || actualArrival === NaN || actualArrival <= TAXI_IN_TIME)
 					throw Error("bad actual arrival date");
+				
+				if (!operationalTimes.actualGateArrival && Date.now() - actualArrival < 3600*1000)
+					return device.sendMessageToDevice(from_address, 'text', "The flight just recently arrived, incomplete data yet.  Please check again in half an hour.");
 
 				var delay = Math.round((actualArrival - plannedArrival)/1000/60);
 				var datafeed = {};
