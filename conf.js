@@ -22,6 +22,9 @@ exports.MIN_AVAILABLE_WITNESSINGS = 100;
 
 exports.bRunWitness = false; // also post empty transactions when there are few datafeed transactions
 
+// peers who are allowed to do unlimited number of requests
+exports.arrUnlimitedPeers = [];
+
 // flightstats credentials
 exports.flightstatsAppId = '';
 exports.flightstatsAppKey = '';

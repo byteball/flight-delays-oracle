@@ -193,6 +193,8 @@ function readExistingData(feed_name, device_address, handleResult){
 }
 
 function checkRequestQuota(device_address, handleResult){
+	if (conf.arrUnlimitedPeers && conf.arrUnlimitedPeers.indexOf(device_address) >= 0)
+		return handleResult();
 	db.query("SELECT COUNT(*) AS count FROM fd_responses WHERE device_address=? AND creation_date > "+db.addTime("-1 DAY"), [device_address], function(rows){
 		if (rows[0].count > MAX_REQUESTS_PER_DEVICE_PER_DAY){
 			notifications.notifyAdmin("too many requests from "+device_address, rows[0].count+" requests today from "+device_address);
