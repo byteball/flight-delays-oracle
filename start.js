@@ -3,16 +3,16 @@
 var moment = require('moment');
 var request = require('request');
 var _ = require('lodash');
-var conf = require('byteballcore/conf.js');
-var db = require('byteballcore/db.js');
-var eventBus = require('byteballcore/event_bus.js');
-var headlessWallet = require('headless-byteball');
-var desktopApp = require('byteballcore/desktop_app.js');
-var objectHash = require('byteballcore/object_hash.js');
+var conf = require('ocore/conf.js');
+var db = require('ocore/db.js');
+var eventBus = require('ocore/event_bus.js');
+var headlessWallet = require('headless-obyte');
+var desktopApp = require('ocore/desktop_app.js');
+var objectHash = require('ocore/object_hash.js');
 var notifications = require('./notifications.js');
 
 if (conf.bRunWitness)
-	require('byteball-witness');
+	require('obyte-witness');
 
 const MAX_REQUESTS_PER_DAY = 100;
 const MAX_REQUESTS_PER_DEVICE_PER_DAY = 10;
@@ -101,8 +101,8 @@ function postDataFeed(datafeed, onDone){
 		notifications.notifyAdminAboutFailedPosting(err);
 		onDone(err);
 	}
-	var network = require('byteballcore/network.js');
-	var composer = require('byteballcore/composer.js');
+	var network = require('ocore/network.js');
+	var composer = require('ocore/composer.js');
 	createOptimalOutputs(function(arrOutputs){
 		let params = {
 			paying_addresses: [my_address], 
@@ -235,7 +235,7 @@ function getInstruction(){
 }
 
 function getHelpText(){
-	return "This oracle can query the status of any flight finished less than 1 week ago and post its delay status to Byteball database.  You can use this data to unlock a smart contract.  Type the flight number and date in DD.MM.YYYY format, e.g.\n\nBA950 "+moment().subtract(1, 'days').format('DD.MM.YYYY');
+	return "This oracle can query the status of any flight finished less than 1 week ago and post its delay status to Obyte database.  You can use this data to unlock a smart contract.  Type the flight number and date in DD.MM.YYYY format, e.g.\n\nBA950 "+moment().subtract(1, 'days').format('DD.MM.YYYY');
 }
 
 function status2text(flightStatus){
@@ -248,12 +248,12 @@ function status2text(flightStatus){
 }
 
 eventBus.on('paired', function(from_address){
-	var device = require('byteballcore/device.js');
+	var device = require('ocore/device.js');
 	device.sendMessageToDevice(from_address, 'text', getHelpText());
 });
 
 eventBus.on('text', function(from_address, text){
-	var device = require('byteballcore/device.js');
+	var device = require('ocore/device.js');
 	text = text.trim();
 	let uc_text = text.toUpperCase();
 
@@ -387,7 +387,7 @@ eventBus.on('text', function(from_address, text){
 });
 
 eventBus.on('my_transactions_became_stable', function(arrUnits){
-	var device = require('byteballcore/device.js');
+	var device = require('ocore/device.js');
 	db.query("SELECT feed_name FROM data_feeds WHERE unit IN(?)", [arrUnits], function(rows){
 		rows.forEach(row => {
 			let feed_name = row.feed_name;
